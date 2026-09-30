@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #define MAX_INPUT 1024
 
@@ -15,20 +18,30 @@ int main(void) {
             break;
         }
 
-        /* remove the trailing newline that fgets keeps */
         input[strcspn(input, "\n")] = '\0';
 
-        /* ignore empty lines */
         if (input[0] == '\0') {
             continue;
         }
 
-        /*Leave the shell*/
         if (strcmp(input, "exit") == 0) {
             break;
         }
 
-        printf("You entered: %s\n", input);
+        pid_t pid = fork();
+
+        if (pid == 0) {
+            /* child: replace this process with the command */
+            char *args[] = { input, NULL };
+            execvp(args[0], args);
+
+            /* only reached if execvp failed */
+            perror("minishell");
+            exit(1);
+        } else {
+            /* parent: wait for the child to finish */
+            waitpid(pid, NULL, 0);
+        }
     }
 
     return 0;
