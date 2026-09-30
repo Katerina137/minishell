@@ -5,30 +5,52 @@
 #include <sys/wait.h>
 
 #define MAX_INPUT 1024
+#define MAX_ARGS  64
 
 /* return values for handle_builtin */
 #define NOT_BUILTIN   0
 #define BUILTIN_DONE  1
 #define BUILTIN_EXIT -1
 
-int handle_builtin(char *input) {
-    if (strcmp(input, "exit") == 0) {
+/* split input on spaces and tabs into a NULL-terminated array */
+int parse_input(char *input, char **args) {
+    int count = 0;
+    char *token = strtok(input, " \t");
+
+    /* leave room for the NULL that execvp needs at the end */
+    while (token != NULL && count < MAX_ARGS - 1) {
+        args[count++] = token;
+        token = strtok(NULL, " \t");
+    }
+
+    args[count] = NULL;
+    return count;
+}
+
+int handle_builtin(char **args, int *exit_code) {
+    /* built-in: leave the shell, with an optional exit code */
+    if (strcmp(args[0], "exit") == 0) {
+        if (args[1] != NULL) {
+            *exit_code = atoi(args[1]);
+        }
         return BUILTIN_EXIT;
     }
 
-    if (strcmp(input, "cd") == 0) {
-        char *home = getenv("HOME");
-        if (home == NULL || chdir(home) != 0) {
+    /* built-in: must run in the shell itself, a child can't move its parent */
+    if (strcmp(args[0], "cd") == 0) {
+        char *path = args[1] ? args[1] : getenv("HOME");
+        if (path == NULL || chdir(path) != 0) {
             perror("cd");
         }
         return BUILTIN_DONE;
     }
 
-    if (strcmp(input, "help") == 0) {
+    /* built-in: list the available built-ins */
+    if (strcmp(args[0], "help") == 0) {
         printf("minishell built-in commands:\n");
-        printf("  cd    change to home directory\n");
-        printf("  help  show this message\n");
-        printf("  exit  quit the shell\n");
+        printf("  cd [dir]     change directory (home if no dir)\n");
+        printf("  help         show this message\n");
+        printf("  exit [code]  quit the shell\n");
         return BUILTIN_DONE;
     }
 
@@ -37,26 +59,29 @@ int handle_builtin(char *input) {
 
 int main(void) {
     char input[MAX_INPUT];
+    char *args[MAX_ARGS];
+    int exit_code = 0;
 
     while (1) {
         printf("minishell> ");
-        fflush(stdout);
+        fflush(stdout);  /* prompt has no newline, so force it to show */
 
+        /* NULL means EOF (Ctrl+D) or a read error: leave cleanly */
         if (fgets(input, MAX_INPUT, stdin) == NULL) {
             printf("\n");
             break;
         }
 
-        /* remove trailing newline that fgets includes */
+        /* remove the trailing newline that fgets keeps */
         input[strcspn(input, "\n")] = '\0';
 
-        /* ignore empty lines */
-        if (input[0] == '\0') {
+        /* ignore empty lines, including lines that are only spaces */
+        if (parse_input(input, args) == 0) {
             continue;
         }
 
-        int builtin = handle_builtin(input);
-        /* handle_builtin returns BUILTIN_EXIT if the user typed "exit" */
+        /* built-ins run in the shell process, no fork needed */
+        int builtin = handle_builtin(args, &exit_code);
         if (builtin == BUILTIN_EXIT) {
             break;
         }
@@ -67,14 +92,17 @@ int main(void) {
         pid_t pid = fork();
 
         if (pid == 0) {
-            char *args[] = { input, NULL };
+            /* child: replace this process with the command */
             execvp(args[0], args);
+
+            /* only reached if execvp failed */
             perror("minishell");
             exit(1);
         } else {
+            /* parent: wait for the child to finish */
             waitpid(pid, NULL, 0);
         }
     }
 
-    return 0;
+    return exit_code;
 }
