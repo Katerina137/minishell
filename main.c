@@ -23,6 +23,11 @@ int main(void) {
             continue;
         }
 
+        /*Leave the shell*/
+        if (strcmp(input, "exit") == 0) {
+            break;
+        }
+
         printf("You entered: %s\n", input);
     }
 
